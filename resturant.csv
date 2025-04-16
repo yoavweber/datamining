@@ -1,0 +1,14 @@
+Customer No.,Alternative Restaurant,Bar,Weekend,Hungry Customer,Restaurant Occupancy,Price Level,Heat Wave,Pre-order,Restaurant Type,Estimated Wait Time,Customer Wait
+1,Yes,No,No,Yes,Moderate,High,No,Yes,French,0-10,Yes
+2,Yes,No,No,Yes,Full,Low,No,No,Asian,30-60,No
+3,No,Yes,No,No,Moderate,Low,No,No,Middle Eastern,0-10,Yes
+4,Yes,No,Yes,Yes,Full,Low,No,No,Asian,30-60,Yes
+5,Yes,No,No,No,Full,High,No,Yes,French,>60,No
+6,No,Yes,No,Yes,Moderate,Moderate,Yes,Yes,Italian,0-10,Yes
+7,No,Yes,No,No,Empty,Low,Yes,No,Asian,0-10,No
+8,No,No,No,Yes,Moderate,Moderate,Yes,Yes,Asian,0-10,Yes
+9,No,No,Yes,No,Full,Low,Yes,Yes,Middle Eastern,>60,No
+10,Yes,Yes,Yes,Yes,Full,High,No,Yes,Italian,10-30,No
+11,No,Yes,No,No,Empty,Low,No,No,Asian,0-10,No
+12,Yes,Yes,Yes,Yes,Full,Low,No,No,Middle Eastern,30-60,Yes
+
