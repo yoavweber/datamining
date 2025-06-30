@@ -71,7 +71,6 @@ def conditional_entropy(df, attribute_col, target_col):
 def generate_entropy_table(df, target_col):
     table_data = []
     # Calculate the total entropy of the target variable correctly
-    # Use calculate_entropy directly on the target column Series
     total_entropy_val, _, _ = calculate_entropy(df[target_col])
 
     for column in df.columns:
@@ -79,6 +78,8 @@ def generate_entropy_table(df, target_col):
             continue
 
         field_probabilities = df[column].value_counts(normalize=True).to_dict()
+        num_options = len(field_probabilities)  # Get number of unique values
+
         # Get conditional entropy and its components
         cond_entropy_val, components = conditional_entropy(df, column, target_col)
         # Calculate Information Gain
@@ -88,7 +89,8 @@ def generate_entropy_table(df, target_col):
             {
                 "Field Attribute": column,
                 "Field Probabilities": field_probabilities,
-                "Total Entropy": round(total_entropy_val, 4),  # Pass total entropy
+                "Num Options": num_options,  # Store number of options
+                "Total Entropy": round(total_entropy_val, 4),
                 "Conditional Entropy": round(cond_entropy_val, 4),
                 "Conditional Entropy Components": components,
                 "Information Gain": round(gain_val, 4),
@@ -96,8 +98,12 @@ def generate_entropy_table(df, target_col):
         )
 
     result_df = pd.DataFrame(table_data)
-    # Sort by Information Gain in descending order
+    # Sort first by Information Gain (desc), then by Num Options (asc)
+    # result_df = result_df.sort_values(
+    #     by=["Information Gain", "Num Options"], ascending=[False, True]
+    # )
     result_df = result_df.sort_values(by="Information Gain", ascending=False)
+
     return result_df
 
 
@@ -209,15 +215,150 @@ def print_pretty_table(result_df):
         print()  # Add a blank line for spacing between rows
 
 
-# Example Usage
-if __name__ == "__main__":
-    # Load your CSV data
-    df = read_csv_data("resturant.csv")
+def filter_dataframe_by_value(df, column_name, value):
+    """Filters the DataFrame to keep only rows where column_name equals value.
 
-    # Set your target column name
-    target_column = "Customer Wait"
+    Args:
+        df (pd.DataFrame): The input DataFrame.
+        column_name (str): The name of the column to filter on.
+        value: The specific value to filter by in the specified column.
 
-    entropy_table = generate_entropy_table(df, target_column)
+    Returns:
+        pd.DataFrame: A new DataFrame containing only the filtered rows.
+    """
+    filtered_df = df[df[column_name] == value].copy()
+    return filtered_df
 
-    # Corrected call: pass the DataFrame directly, not its string representation
+
+def build_decision_tree_level(
+    current_df, target_column, available_attributes, level=0, max_depth=2
+):
+    """Recursively calculates and prints entropy tables for decision tree levels."""
+    indent = "  " * level  # Indentation for printing
+    print(
+        f"\n{indent}--- Analyzing Level {level} --- Subset Size: {len(current_df)} ---"
+    )
+
+    # --- Base Cases ---
+    if current_df.empty:
+        print(f"{indent}Subset is empty. Stopping branch.")
+        return
+
+    if level >= max_depth:
+        print(f"{indent}Reached max depth ({max_depth}). Stopping branch.")
+        # Determine majority class if needed (optional)
+        if not current_df.empty:
+            majority_class = current_df[target_column].mode()[0]
+            print(f"{indent}Majority class in this subset: {majority_class}")
+        return
+
+    subset_target_entropy, _, _ = calculate_entropy(current_df[target_column])
+    print(
+        f"{indent}Entropy of target ('{target_column}') in this subset: {subset_target_entropy:.4f}"
+    )
+
+    if subset_target_entropy == 0:
+        class_label = current_df[target_column].iloc[0]  # Faster than unique()[0]
+        print(
+            f"{indent}Subset is PURE. All instances have Target = '{class_label}'. Stopping branch."
+        )
+        return
+
+    if not available_attributes:
+        print(f"{indent}No more attributes to split on.")
+        majority_class = current_df[target_column].mode()[0]
+        print(f"{indent}Majority class in this leaf: {majority_class}")
+        return
+
+    # --- Recursive Step ---
+    print(f"{indent}Calculating entropy table for impure subset...")
+    # Create a temporary DataFrame with only available attributes + target for table generation
+    df_for_table = current_df[available_attributes + [target_column]].copy()
+    entropy_table = generate_entropy_table(df_for_table, target_column)
+
+    if entropy_table.empty:
+        print(
+            f"{indent}Entropy table is empty (likely only target column remains or constant attributes)."
+        )
+        majority_class = current_df[target_column].mode()[0]
+        print(f"{indent}Majority class in this leaf: {majority_class}")
+        return
+
+    print(f"\n{indent}" + "=" * 70)
+    print(f"{indent}--- Entropy Table (Level {level}, Subset) ---")
     print_pretty_table(entropy_table)
+    print(f"{indent}" + "=" * 70)
+    print(f"{indent}" + "-" * 50)
+
+    best_attribute = entropy_table.iloc[0]["Field Attribute"]
+    print(f"{indent}Best Attribute to Split On at Level {level}: {best_attribute}")
+
+    # Prepare for next level
+    next_available_attributes = [
+        attr for attr in available_attributes if attr != best_attribute
+    ]
+    attribute_values = list(entropy_table.iloc[0]["Field Probabilities"].keys())
+
+    for value in attribute_values:
+        print(f"{indent}--> Branching on '{best_attribute}' == '{value}'")
+        # Filter original subset (current_df) based on the split
+        filtered_data = filter_dataframe_by_value(current_df, best_attribute, value)
+        # Recursive call
+        build_decision_tree_level(
+            filtered_data,
+            target_column,
+            next_available_attributes,
+            level + 1,
+            max_depth,
+        )
+
+
+# --- Main Execution Block --- (Replaces previous main block)
+if __name__ == "__main__":
+    # --- Setup ---
+    filepath = "resturant.csv"
+    target_column = "Customer Wait"
+    # Drop the first column (index 0) instead of by name
+    # id_column = "Customer No. " # No longer needed
+    max_recursion_depth = 4  # Adjust as needed
+
+    print(f"Loading data from: {filepath}")
+    df = read_csv_data(filepath)
+    print(f"Initial DataFrame shape: {df.shape}")
+
+    # --- Preprocessing ---
+    if df.shape[1] > 1:  # Ensure there's more than one column
+        first_col_name = df.columns[0]
+        print(f"Dropping the first column (index 0): '{first_col_name}'")
+        df = df.iloc[:, 1:]  # Select all rows, and columns from index 1 onwards
+        print(f"DataFrame shape after dropping first column: {df.shape}")
+    else:
+        print(
+            "Warning: DataFrame has only one column or is empty. Cannot drop first column."
+        )
+
+    # Check if target column still exists after potentially dropping columns
+    if target_column not in df.columns:
+        print(
+            f"Error: Target column '{target_column}' not found in the DataFrame after preprocessing."
+        )
+    else:
+        # Get initial list of attributes to consider (all columns except target)
+        initial_attributes = [col for col in df.columns if col != target_column]
+
+        if not initial_attributes:
+            print(
+                "Error: No attributes available for analysis after dropping first column and target column."
+            )
+        else:
+            print(f"Target Column: '{target_column}'")
+            print(f"Initial Attributes for Analysis: {initial_attributes}")
+            print("=" * 60)
+
+            # --- Start Recursive Tree Build Process ---
+            build_decision_tree_level(
+                df, target_column, initial_attributes, max_depth=max_recursion_depth
+            )
+
+            print("\n" + "=" * 60)
+            print("Decision tree analysis process finished.")
