@@ -166,36 +166,8 @@ def print_pretty_table(result_df):
         axis=1,
     )
 
-    # Define column headers with custom widths
-    header_attr = "Field Attribute"
-    header_prob = "Field Probabilities"
-    header_cond_detailed = (
-        "Cond Entropy Detail ({Value: P(Val)*[Calc=H(S|Val)]...}=Result)"  # Abbreviated
-    )
-    header_cond_sum = "Cond Entropy Sum (Σ P(Val)*H(S|Val)=Result)"
-    header_gain = "Information Gain (H(T) - H(T|A) = Gain)"  # Updated Header
-
-    # Setting column widths
-    width_attr = 18
-    width_prob = 40
-    width_cond_detailed = 100  # Slightly reduced detailed width
-    width_cond_sum = 50  # Slightly reduced sum width
-    width_gain = 45  # Width for gain formula
-
-    # Update header line and separator to include the new column
-    header_line = (
-        f"{header_attr:<{width_attr}} | "
-        f"{header_prob:<{width_prob}} | "
-        f"{header_cond_detailed:<{width_cond_detailed}} | "
-        f"{header_cond_sum:<{width_cond_sum}} | "
-        f"{header_gain:<{width_gain}}"  # Use updated gain header and width
-    )
-    separator = "-" * len(header_line)
-
-    print(header_line)
-    print(separator)
-
-    # Iterate through the DataFrame rows for printing
+    # Collect summary for all attributes
+    summary_rows = []
     for index, row in print_df.iterrows():
         attr = str(row["Field Attribute"])
         # Print headline for the column/attribute
@@ -204,19 +176,21 @@ def print_pretty_table(result_df):
         cond_formula_detailed = row["Formatted Conditional Entropy Detailed"]
         cond_formula_sum = row["Formatted Conditional Entropy Sum"]
         gain_formula = row["Formatted Information Gain"]  # Get formatted gain
+        gain = row["Information Gain"]
 
         # Print each section on a new line with a label
         print(f"Attribute: {attr}")
         print(f"Probabilities: {prob}")
         # Show how probabilities were calculated
-        # Get the original probability dict for this attribute
         prob_dict = row["Field Probabilities"]
         total_count = sum([v for v in prob_dict.values()])
         prob_calc_lines = []
         for val, p in prob_dict.items():
             count = int(round(p * total_count)) if total_count > 0 else 0
             prob_calc_lines.append(f"P({val}) = {count}/{int(total_count)} = {p:.2f}")
-        # print(f"Cond Entropy: {cond_formula_detailed}")
+        print("Probability formula:")
+        for line in prob_calc_lines:
+            print(f"  {line}")
         # Print conditional entropy details as a markdown table
         print("| Value | P(Value) | Entropy Formula | Entropy Value |")
         print("|-------|----------|-----------------|---------------|")
@@ -227,6 +201,16 @@ def print_pretty_table(result_df):
         print(f"Cond Entropy Sum: {cond_formula_sum}")
         print(f"Gain: {gain_formula}")
         print()  # Add a blank line for spacing between columns
+        # Collect for summary
+        summary_rows.append((attr, gain))
+
+    # Print summary table
+    print("Summary of Information Gain for this level:")
+    print("| Attribute | Information Gain |")
+    print("|-----------|------------------|")
+    for attr, gain in summary_rows:
+        print(f"| {attr} | {gain:.4f} |")
+    print()
 
 
 def filter_dataframe_by_value(df, column_name, value):
@@ -285,7 +269,6 @@ def build_decision_tree_level(
         return
 
     # --- Recursive Step ---
-    print(f"{indent}Calculating entropy table for impure subset...")
     # Create a temporary DataFrame with only available attributes + target for table generation
     df_for_table = current_df[available_attributes + [target_column]].copy()
     entropy_table = generate_entropy_table(df_for_table, target_column)
@@ -299,7 +282,7 @@ def build_decision_tree_level(
         return
 
     print(f"\n{indent}" + "=" * 70)
-    print(f"{indent}--- Entropy Table (Level {level}, Subset) ---")
+    print(f"{indent}--- Entropy Table (Level {level}) ---")
     print_pretty_table(entropy_table)
     print(f"{indent}" + "=" * 70)
     print(f"{indent}" + "-" * 50)
