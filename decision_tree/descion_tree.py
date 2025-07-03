@@ -198,21 +198,35 @@ def print_pretty_table(result_df):
     # Iterate through the DataFrame rows for printing
     for index, row in print_df.iterrows():
         attr = str(row["Field Attribute"])
+        # Print headline for the column/attribute
+        print(f"--- Entropy Calculation for: {attr} ---")
         prob = row["Formatted Probabilities"]
         cond_formula_detailed = row["Formatted Conditional Entropy Detailed"]
         cond_formula_sum = row["Formatted Conditional Entropy Sum"]
         gain_formula = row["Formatted Information Gain"]  # Get formatted gain
 
-        # Update line format to include the new formatted gain column
-        line = (
-            f"{attr:<{width_attr}} | "
-            f"{prob:<{width_prob}} | "
-            f"{cond_formula_detailed:<{width_cond_detailed}} | "
-            f"{cond_formula_sum:<{width_cond_sum}} | "
-            f"{gain_formula:<{width_gain}}"  # Use formatted gain
-        )
-        print(line)
-        print()  # Add a blank line for spacing between rows
+        # Print each section on a new line with a label
+        print(f"Attribute: {attr}")
+        print(f"Probabilities: {prob}")
+        # Show how probabilities were calculated
+        # Get the original probability dict for this attribute
+        prob_dict = row["Field Probabilities"]
+        total_count = sum([v for v in prob_dict.values()])
+        prob_calc_lines = []
+        for val, p in prob_dict.items():
+            count = int(round(p * total_count)) if total_count > 0 else 0
+            prob_calc_lines.append(f"P({val}) = {count}/{int(total_count)} = {p:.2f}")
+        # print(f"Cond Entropy: {cond_formula_detailed}")
+        # Print conditional entropy details as a markdown table
+        print("| Value | P(Value) | Entropy Formula | Entropy Value |")
+        print("|-------|----------|-----------------|---------------|")
+        for val, p_val, e_subset, formula_subset, _ in row[
+            "Conditional Entropy Components"
+        ]:
+            print(f"| {val} | {p_val:.2f} | {formula_subset} | {e_subset:.4f} |")
+        print(f"Cond Entropy Sum: {cond_formula_sum}")
+        print(f"Gain: {gain_formula}")
+        print()  # Add a blank line for spacing between columns
 
 
 def filter_dataframe_by_value(df, column_name, value):
@@ -316,8 +330,8 @@ def build_decision_tree_level(
 # --- Main Execution Block --- (Replaces previous main block)
 if __name__ == "__main__":
     # --- Setup ---
-    filepath = "resturant.csv"
-    target_column = "Customer Wait"
+    filepath = "exams/2024/78/dataset.csv"
+    target_column = "סוג דיאטה"
     # Drop the first column (index 0) instead of by name
     # id_column = "Customer No. " # No longer needed
     max_recursion_depth = 4  # Adjust as needed
