@@ -3,6 +3,7 @@ import os
 from datetime import datetime
 from clusters.hac import hac, single_linkage
 from clusters.distance import manhattan_distance
+from clusters.kmeans import kmeans_verbose
 
 # currently only supports clustering
 
@@ -55,4 +56,24 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # main()
+
+    # Exam k-means example
+    print("\n\n===== K-MEANS EXAM EXAMPLE =====\n")
+    points = [
+        (1, 2, 3),
+        (0, 1, 2),
+        (3, 0, 5),
+        (4, 1, 3),
+        (5, 0, 1),
+    ]
+    initial_centroids = [
+        (1, 0, 0),
+        (0, 1, 1),
+    ]
+    kmeans_verbose(
+        points,
+        k=2,
+        initial_centroids=initial_centroids,
+        distance_func=manhattan_distance,
+    )
