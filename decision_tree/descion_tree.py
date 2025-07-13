@@ -1,5 +1,23 @@
 import pandas as pd
 import numpy as np
+from fractions import Fraction
+
+# Helper: pretty-print the decision tree structure once built
+def _print_tree(node, indent=""):
+    """Recursively prints the learned decision-tree structure."""
+    if not node:
+        return
+    # Leaf node
+    if "label" in node:
+        print(f"{indent}└─ Leaf → {node['label']}")
+        return
+
+    attr = node.get("attribute")
+    if attr is None:
+        return
+    for val, child in node.get("branches", {}).items():
+        print(f"{indent}└─ {attr} = {val}")
+        _print_tree(child, indent + "   ")
 
 
 def read_csv_data(filepath):
@@ -18,8 +36,8 @@ def calculate_entropy(series):
         if prob > 0:
             term = prob * np.log2(prob)
             entropy_val -= term
-            # Using 4 decimal places for probabilities in formula for readability
-            formula_terms.append(f"{prob:.4f}*log2({prob:.4f})")
+            frac_str = str(Fraction(prob).limit_denominator())
+            formula_terms.append(f"{frac_str} X log2({frac_str})")
         # else: p*log2(p) -> 0 as p->0, so we can ignore prob=0 cases
 
     # Construct the formula string
@@ -107,11 +125,14 @@ def generate_entropy_table(df, target_col):
     return result_df
 
 
-def print_pretty_table(result_df):
+def print_pretty_table(result_df, df, target_col, parent_label="ROOT"):
     # Convert the Field Probabilities dictionaries to formatted strings
     def format_probabilities(prob_dict):
-        formatted = ", ".join(f"{k}: {v:.2f}" for k, v in prob_dict.items())
-        return f"{{ {formatted} }}"
+        formatted_items = []
+        for k, v in prob_dict.items():
+            frac = Fraction(v).limit_denominator()
+            formatted_items.append(f"{k}: {frac}")
+        return f"{{ {', '.join(formatted_items)} }}"
 
     # Format the conditional entropy to show detailed subset entropy calculation
     def format_cond_entropy_detailed(components, final_value):
@@ -119,7 +140,8 @@ def print_pretty_table(result_df):
         # Components: (val, p_val, e_subset, formula_subset, probs_subset)
         for val, p_val, e_subset, formula_subset, _ in components:
             # Format: P(Val) * ( [Entropy Formula] = Entropy Value )
-            calc_str = f"{p_val:.2f}*({formula_subset} = {e_subset:.4f})"
+            frac_str = str(Fraction(p_val).limit_denominator())
+            calc_str = f"{frac_str}*({formula_subset} = {e_subset:.4f})"
             terms_dict[str(val)] = calc_str
 
         terms_str = ", ".join(f"{k}: {v}" for k, v in terms_dict.items())
@@ -131,7 +153,7 @@ def print_pretty_table(result_df):
         # Components: (val, p_val, e_subset, formula_subset, probs_subset)
         terms = []
         for _, p_val, e_subset, _, _ in components:
-            terms.append(f"{p_val:.2f}*{e_subset:.4f}")
+            terms.append(f"{str(Fraction(p_val).limit_denominator())}X{e_subset:.4f}")
         formula = " + ".join(terms)
         return f"{formula} = {final_value:.4f}"
 
@@ -158,39 +180,64 @@ def print_pretty_table(result_df):
         ),
         axis=1,
     )
-    # Apply the gain formula formatting
-    print_df["Formatted Information Gain"] = print_df.apply(
-        lambda row: format_gain_formula(
-            row["Total Entropy"], row["Conditional Entropy"], row["Information Gain"]
-        ),
-        axis=1,
-    )
+
+    # NOTE: Information Gain is no longer required, so we skip its formatting.
 
     # Collect summary for all attributes
     summary_rows = []
     for index, row in print_df.iterrows():
         attr = str(row["Field Attribute"])
-        # Print headline for the column/attribute
-        print(f"--- Entropy Calculation for: {attr} ---")
+        # Print headline including parent context
+        print(f"--- Entropy Calculation for: {attr} (Parent: {parent_label}) ---")
         prob = row["Formatted Probabilities"]
         cond_formula_detailed = row["Formatted Conditional Entropy Detailed"]
         cond_formula_sum = row["Formatted Conditional Entropy Sum"]
-        gain_formula = row["Formatted Information Gain"]  # Get formatted gain
-        gain = row["Information Gain"]
+        cond_entropy_val = row["Conditional Entropy"]
 
         # Print each section on a new line with a label
         print(f"Attribute: {attr}")
-        print(f"Probabilities: {prob}")
+        print(f"Probabilities: {prob} \n")
         # Show how probabilities were calculated
         prob_dict = row["Field Probabilities"]
         total_count = sum([v for v in prob_dict.values()])
         prob_calc_lines = []
         for val, p in prob_dict.items():
-            count = int(round(p * total_count)) if total_count > 0 else 0
-            prob_calc_lines.append(f"P({val}) = {count}/{int(total_count)} = {p:.2f}")
-        print("Probability formula:")
-        for line in prob_calc_lines:
-            print(f"  {line}")
+            count = round(p * total_count, 2) if total_count > 0 else 0
+            prob_calc_lines.append(f"P({val}) = {str(Fraction(p).limit_denominator())}")
+        # Print summary for each value of the attribute as a table
+        # Get all possible classes in the target column for this attribute
+        all_classes = sorted(df[target_col].unique())
+        # Calculate total for this attribute (sum of all counts for its values)
+        total_for_attribute = sum(
+            [len(df[df[attr] == val]) for val in row["Field Probabilities"].keys()]
+        )
+        # Print table header
+        header = [
+            "Value",
+            'סה"כ',
+            "Probability (Fraction)",
+            "Probability (Decimal)",
+        ] + all_classes
+        print("| " + " | ".join(header) + " |")
+        print("|" + "-------|" * len(header))
+        for val, _ in row["Field Probabilities"].items():
+            subset = df[df[attr] == val]
+            total = len(subset)
+            # Probability as fraction and decimal
+            prob_fraction = (
+                f"{total}/{total_for_attribute}" if total_for_attribute > 0 else "0/0"
+            )
+            prob_decimal = (
+                f"{(total/total_for_attribute):.2f}"
+                if total_for_attribute > 0
+                else "0.00"
+            )
+            value_counts = subset[target_col].value_counts()
+            row_vals = [val, str(total), prob_fraction, prob_decimal] + [
+                str(value_counts.get(cls, 0)) for cls in all_classes
+            ]
+            print("| " + " | ".join(row_vals) + " |")
+        print("")
         # Print conditional entropy details as a markdown table
         print("| Value | P(Value) | Entropy Formula | Entropy Value |")
         print("|-------|----------|-----------------|---------------|")
@@ -198,18 +245,20 @@ def print_pretty_table(result_df):
             "Conditional Entropy Components"
         ]:
             print(f"| {val} | {p_val:.2f} | {formula_subset} | {e_subset:.4f} |")
+        print("\n")
         print(f"Cond Entropy Sum: {cond_formula_sum}")
-        print(f"Gain: {gain_formula}")
+        # Print the conditional entropy value for this attribute
+        print(f"Conditional Entropy: {cond_entropy_val:.4f}")
         print()  # Add a blank line for spacing between columns
         # Collect for summary
-        summary_rows.append((attr, gain))
+        summary_rows.append((attr, cond_entropy_val))
 
     # Print summary table
-    print("Summary of Information Gain for this level:")
-    print("| Attribute | Information Gain |")
+    print(f"Summary of Conditional Entropy for this level (Parent: {parent_label}): \n")
+    print("| Attribute | Conditional Entropy |")
     print("|-----------|------------------|")
-    for attr, gain in summary_rows:
-        print(f"| {attr} | {gain:.4f} |")
+    for attr, cond in summary_rows:
+        print(f"| {attr} | {cond:.4f} |")
     print()
 
 
@@ -229,12 +278,23 @@ def filter_dataframe_by_value(df, column_name, value):
 
 
 def build_decision_tree_level(
-    current_df, target_column, available_attributes, level=0, max_depth=2
+    current_df,
+    target_column,
+    available_attributes,
+    level=0,
+    max_depth=2,
+    tree_node=None,
+    rule="ROOT",
 ):
     """Recursively calculates and prints entropy tables for decision tree levels."""
     indent = "  " * level  # Indentation for printing
+
+    # Initialise the node holder on first call
+    if tree_node is None:
+        tree_node = {}
+
     print(
-        f"\n{indent}--- Analyzing Level {level} --- Subset Size: {len(current_df)} ---"
+        f"\n{indent}--- Analyzing Level {level} --- Subset Size: {len(current_df)} (Parent: {rule}) ---"
     )
 
     # --- Base Cases ---
@@ -250,13 +310,26 @@ def build_decision_tree_level(
             print(f"{indent}Majority class in this subset: {majority_class}")
         return
 
-    subset_target_entropy, _, _ = calculate_entropy(current_df[target_column])
+    # Calculate and print entropy details for the target column
+    subset_target_entropy, entropy_formula, prob_dict = calculate_entropy(
+        current_df[target_column]
+    )
+    # Print counts for each class
+    value_counts = current_df[target_column].value_counts()
+    print(f"{indent}Target value counts: {dict(value_counts)}")
+    # Print probabilities for each class
+    print(
+        f"{indent}Target probabilities: {', '.join([f'{k}: {v:.4f}' for k, v in prob_dict.items()])}"
+    )
+    # Print the entropy formula
+    print(f"{indent}Entropy formula: {entropy_formula}")
     print(
         f"{indent}Entropy of target ('{target_column}') in this subset: {subset_target_entropy:.4f}"
     )
 
     if subset_target_entropy == 0:
-        class_label = current_df[target_column].iloc[0]  # Faster than unique()[0]
+        class_label = current_df[target_column].iloc[0]
+        tree_node["label"] = class_label  # mark leaf
         print(
             f"{indent}Subset is PURE. All instances have Target = '{class_label}'. Stopping branch."
         )
@@ -283,37 +356,46 @@ def build_decision_tree_level(
 
     print(f"\n{indent}" + "=" * 70)
     print(f"{indent}--- Entropy Table (Level {level}) ---")
-    print_pretty_table(entropy_table)
+    print_pretty_table(entropy_table, current_df, target_column, parent_label=rule)
     print(f"{indent}" + "=" * 70)
     print(f"{indent}" + "-" * 50)
 
     best_attribute = entropy_table.iloc[0]["Field Attribute"]
+    tree_node["attribute"] = best_attribute
+    tree_node["branches"] = {}
     print(f"{indent}Best Attribute to Split On at Level {level}: {best_attribute}")
 
+    print(f"{indent}Moving to the next level of the decision tree: {level}")
     # Prepare for next level
     next_available_attributes = [
         attr for attr in available_attributes if attr != best_attribute
     ]
     attribute_values = list(entropy_table.iloc[0]["Field Probabilities"].keys())
-
+    print(f"{indent}Attribute Values: {attribute_values}")
     for value in attribute_values:
         print(f"{indent}--> Branching on '{best_attribute}' == '{value}'")
         # Filter original subset (current_df) based on the split
         filtered_data = filter_dataframe_by_value(current_df, best_attribute, value)
         # Recursive call
+        branch_node = {}
+        tree_node["branches"][value] = branch_node
+        child_rule = f"{best_attribute}={value}"
         build_decision_tree_level(
             filtered_data,
             target_column,
             next_available_attributes,
             level + 1,
             max_depth,
+            branch_node,
+            rule=child_rule,
         )
 
 
 # --- Main Execution Block --- (Replaces previous main block)
-if __name__ == "__main__":
+def main():
+    """Main entry point for Poetry script."""
     # --- Setup ---
-    filepath = "exams/2024/78/dataset.csv"
+    filepath = "exams/2024/78/dataset_dec.csv"
     target_column = "סוג דיאטה"
     # Drop the first column (index 0) instead of by name
     # id_column = "Customer No. " # No longer needed
@@ -353,9 +435,17 @@ if __name__ == "__main__":
             print("=" * 60)
 
             # --- Start Recursive Tree Build Process ---
+            tree_structure = {}
             build_decision_tree_level(
-                df, target_column, initial_attributes, max_depth=max_recursion_depth
+                df, target_column, initial_attributes, max_depth=max_recursion_depth, tree_node=tree_structure
             )
 
             print("\n" + "=" * 60)
             print("Decision tree analysis process finished.")
+
+            # Print the learned decision-tree structure
+            print("\nFull Decision-Tree Structure:")
+            _print_tree(tree_structure)
+
+if __name__ == "__main__":
+    main()
