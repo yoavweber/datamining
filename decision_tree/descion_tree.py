@@ -1,5 +1,7 @@
 import pandas as pd
 import numpy as np
+import io
+import contextlib
 from fractions import Fraction
 
 # Helper: pretty-print the decision tree structure once built
@@ -18,6 +20,12 @@ def _print_tree(node, indent=""):
     for val, child in node.get("branches", {}).items():
         print(f"{indent}└─ {attr} = {val}")
         _print_tree(child, indent + "   ")
+
+# Helper: compute maximum depth of built tree (root depth = 0)
+def _tree_max_depth(node):
+    if not node or "label" in node:
+        return 0
+    return 1 + max((_tree_max_depth(c) for c in node.get("branches", {}).values()), default=0)
 
 
 def read_csv_data(filepath):
@@ -116,11 +124,12 @@ def generate_entropy_table(df, target_col):
         )
 
     result_df = pd.DataFrame(table_data)
-    # Sort first by Information Gain (desc), then by Num Options (asc)
-    # result_df = result_df.sort_values(
-    #     by=["Information Gain", "Num Options"], ascending=[False, True]
-    # )
-    result_df = result_df.sort_values(by="Information Gain", ascending=False)
+    # Rank attributes: 1) lowest conditional entropy (better split)
+    #                   2) if tie, attribute with MORE distinct values to favour deeper trees
+    result_df = result_df.sort_values(
+        by=["Conditional Entropy", "Num Options"],
+        ascending=[True, False],
+    )
 
     return result_df
 
@@ -285,6 +294,7 @@ def build_decision_tree_level(
     max_depth=2,
     tree_node=None,
     rule="ROOT",
+    forced_root_attr=None,
 ):
     """Recursively calculates and prints entropy tables for decision tree levels."""
     indent = "  " * level  # Indentation for printing
@@ -346,6 +356,12 @@ def build_decision_tree_level(
     df_for_table = current_df[available_attributes + [target_column]].copy()
     entropy_table = generate_entropy_table(df_for_table, target_column)
 
+    # If at root and a specific attribute is forced, move it to the top
+    if level == 0 and forced_root_attr is not None:
+        if forced_root_attr in entropy_table["Field Attribute"].values:
+            idx = entropy_table.index[entropy_table["Field Attribute"] == forced_root_attr][0]
+            entropy_table = pd.concat([entropy_table.loc[[idx]], entropy_table.drop(idx)], ignore_index=True)
+
     if entropy_table.empty:
         print(
             f"{indent}Entropy table is empty (likely only target column remains or constant attributes)."
@@ -395,8 +411,8 @@ def build_decision_tree_level(
 def main():
     """Main entry point for Poetry script."""
     # --- Setup ---
-    filepath = "exams/2024/78/dataset_dec.csv"
-    target_column = "סוג דיאטה"
+    filepath = "exams/2025/data_dec.csv"
+    target_column = "לחץ דם"
     # Drop the first column (index 0) instead of by name
     # id_column = "Customer No. " # No longer needed
     max_recursion_depth = 4  # Adjust as needed
@@ -434,18 +450,46 @@ def main():
             print(f"Initial Attributes for Analysis: {initial_attributes}")
             print("=" * 60)
 
-            # --- Start Recursive Tree Build Process ---
-            tree_structure = {}
-            build_decision_tree_level(
-                df, target_column, initial_attributes, max_depth=max_recursion_depth, tree_node=tree_structure
-            )
+            # --- Determine candidate root attributes with equal minimal entropy ---
+            root_entropy_table = generate_entropy_table(df[initial_attributes + [target_column]], target_column)
+            min_ce = root_entropy_table["Conditional Entropy"].min()
+            EPS = 1e-6
+            candidates = root_entropy_table[
+                (root_entropy_table["Conditional Entropy"] - min_ce).abs() < EPS
+            ]["Field Attribute"].tolist()
 
+            best_depth = -1
+            best_log = ""
+            best_tree = {}
+
+            for cand in candidates:
+                tree_structure = {}
+                buffer = io.StringIO()
+                with contextlib.redirect_stdout(buffer):
+                    # Reorder attributes so cand appears first but others remain
+                    reordered = [cand] + [a for a in initial_attributes if a != cand]
+                    build_decision_tree_level(
+                        df,
+                        target_column,
+                        reordered,
+                        max_depth=max_recursion_depth,
+                        tree_node=tree_structure,
+                        forced_root_attr=cand,
+                    )
+
+                depth = _tree_max_depth(tree_structure)
+                if depth > best_depth:
+                    best_depth = depth
+                    best_log = buffer.getvalue()
+                    best_tree = tree_structure
+
+            # ----- Print only the deepest tree logs -----
+            print(best_log)
             print("\n" + "=" * 60)
             print("Decision tree analysis process finished.")
 
-            # Print the learned decision-tree structure
-            print("\nFull Decision-Tree Structure:")
-            _print_tree(tree_structure)
+            print("\nFull Decision-Tree Structure (deepest):")
+            _print_tree(best_tree)
 
 if __name__ == "__main__":
     main()
